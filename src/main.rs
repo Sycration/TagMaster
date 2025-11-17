@@ -30,12 +30,14 @@ use iced::widget::horizontal_rule;
 use iced::widget::pane_grid;
 use iced::widget::pane_grid::Target;
 use iced::widget::pane_grid::TitleBar;
+use iced::widget::rich_text;
 use iced::widget::row;
 use iced::widget::rule;
 use iced::widget::scrollable;
 use iced::widget::span;
 use iced::widget::text;
 use iced::widget::text_input;
+use iced::widget::text_input::default;
 use iced::window;
 use iced::window::Id;
 use iced::window::Settings;
@@ -46,6 +48,7 @@ use iced_aw::style::colors::WHITE;
 enum Message {
     None,
     Debug(String),
+    Initialize,
     OpenLink(String),
     OpenWindow(Subwindow),
     CloseWindow(Subwindow),
@@ -88,6 +91,7 @@ enum Pane {
 struct State {
     windows: Vec<(Id, Subwindow)>,
     screen: Screen,
+    statusline: String,
     panes: pane_grid::State<Pane>,
     project: Option<Project>,
     new_proj_state: NewProjState,
@@ -110,6 +114,7 @@ impl Default for State {
             project: None,
             screen: Screen::Home,
             new_proj_state: NewProjState::default(),
+            statusline: String::new()
         }
     }
 }
@@ -131,7 +136,7 @@ pub fn main() -> iced::Result {
         .run_with(|| {
             (
                 State::default(),
-                Task::done(Message::OpenWindow(Subwindow::Main)), //TODO startup function/message
+                Task::done(Message::Initialize), //TODO startup function/message
             )
         })
 }
@@ -152,8 +157,13 @@ fn theme(_state: &State, _id: Id) -> Theme {
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::None => Task::none(),
+        Message::Initialize => {
+            update(state, Message::Debug("Initialized".to_string())).chain(update(state, Message::OpenWindow(Subwindow::Main)))
+        },
+
         Message::Debug(s) => {
-            eprintln!("{s}");
+            eprintln!("{}", &s);
+            state.statusline = s;
             Task::none()
         }
         Message::ChangeScreen(screen) => {
@@ -522,7 +532,16 @@ fn main_window(state: &State) -> Element<Message> {
     }
     .height(Length::Fill);
 
-    widget::container(widget::column![top_bar, horizontal_rule(2), body].spacing(10))
+    let statusline = text_input("", &state.statusline).font(iced::font::Font::MONOSPACE).style(|theme: &Theme, status|{
+        let palette = theme.extended_palette();
+        text_input::Style {
+            value: WHITE,
+            ..default(theme, status)
+        }
+    });
+
+
+    widget::container(widget::column![top_bar, horizontal_rule(2), body, statusline].spacing(10))
         .padding(10)
         .into()
 }
