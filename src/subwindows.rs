@@ -1,0 +1,106 @@
+use crate::{Message, State, update};
+use iced::{
+    Task,
+    window::{self, Id, Settings},
+};
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub(crate) enum Subwindow {
+    Main,
+    NewProject,
+    ProjectSettings,
+    ProgramSettings,
+}
+
+pub(crate) fn open_window(state: &mut State, sw: Subwindow) -> Task<Message> {
+    let window = match sw {
+        Subwindow::Main => {
+            if state.windows.iter().find(|x| x.1 == sw).is_none() {
+                let window = window::open(Settings {
+                    level: window::Level::AlwaysOnBottom,
+
+                    ..Default::default()
+                });
+                state.windows.push((window.0, sw));
+                window.1
+            } else {
+                Task::none()
+            }
+        }
+        Subwindow::ProjectSettings => {
+            if state.windows.iter().find(|x| x.1 == sw).is_none() {
+                let window = window::open(Settings {
+                    size: iced::Size {
+                        width: 300.0,
+                        height: 500.0,
+                    },
+                    level: window::Level::AlwaysOnTop,
+                    ..Default::default()
+                });
+                state.windows.push((window.0, sw));
+                window.1
+            } else {
+                Task::none()
+            }
+        }
+        Subwindow::ProgramSettings => {
+            if state.windows.iter().find(|x| x.1 == sw).is_none() {
+                let window = window::open(Settings {
+                    size: iced::Size {
+                        width: 300.0,
+                        height: 500.0,
+                    },
+                    level: window::Level::AlwaysOnTop,
+                    ..Default::default()
+                });
+                state.windows.push((window.0, sw));
+                window.1
+            } else {
+                Task::none()
+            }
+        }
+        Subwindow::NewProject => {
+            if state.windows.iter().find(|x| x.1 == sw).is_none() {
+                let window = window::open(Settings {
+                    size: iced::Size {
+                        width: 600.0,
+                        height: 400.0,
+                    },
+                    level: window::Level::AlwaysOnTop,
+                    ..Default::default()
+                });
+                state.windows.push((window.0, sw));
+                window.1
+            } else {
+                Task::none()
+            }
+        }
+    };
+    window.map(|_x| Message::None)
+}
+
+pub(crate) fn close_window(state: &mut State, sw: Subwindow) -> Task<Message> {
+    let old_windows = state.windows.clone();
+    if let Some(id) = old_windows.iter().find(|x| x.1 == sw) {
+        if id.1 == Subwindow::Main {
+            update(state, Message::CloseProj).chain(window::close(id.0).chain(iced::exit()))
+        } else {
+            state.windows.retain(|w| w.1 != id.1);
+            let window = window::close(id.0);
+            window
+        }
+    } else {
+        Task::none()
+    }
+}
+
+pub(crate) fn close_window_by_id(state: &mut State, id: Id) -> Task<Message>{
+            if Some(Subwindow::Main) == state.windows.iter().find(|x| x.0 == id).map(|x| x.1) {
+                update(state, Message::CloseProj);
+                window::close(id).chain(iced::exit())
+            } else {
+                let window = window::close(id);
+                state.windows.retain(|w| w.0 != id);
+                window
+            }
+        }
