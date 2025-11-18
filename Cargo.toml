@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 iced = {version = "0.13.1", features = ["tokio", "image", "advanced"]}
 iced_aw = { version = "0.12", features = ["card"] }
+rfd = "0.15.4"
 webbrowser = "1.0.6"
 
 [profile.dev.package."*"]

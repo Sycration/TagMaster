@@ -1,5 +1,5 @@
-use crate::{Message, Pane, State, screens::Screen, subwindows::Subwindow, update};
-use iced::{Alignment::Center, Border, Element, Length::{self, Fill}, Task, Theme, border::Radius, widget::{self, Space, button, column, container, pane_grid, row, scrollable, text_input}};
+use crate::{Message, State, subwindows::Subwindow};
+use iced::{Element, widget::{button}};
 
 
 pub(crate) fn project_settings(state: &State) -> Element<Message> {

@@ -1,0 +1,24 @@
+use iced::{Element, Task};
+
+use crate::Message;
+
+#[derive(Debug, Clone)]
+pub(crate) struct XState {}
+
+impl Default for XState {
+    fn default() -> Self {
+        Self {  }
+    }
+}
+
+#[derive(Debug, Clone)]
+
+pub(crate) enum XMessage {}
+
+pub(crate) fn x(state: &XState) -> Element<Message> {
+    "".into()
+}
+
+pub(crate) fn x_handle(state: &mut XState, event: XMessage) -> Task<Message> {
+    Task::none()
+}

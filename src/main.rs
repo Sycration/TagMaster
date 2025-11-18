@@ -1,49 +1,22 @@
 use std::fmt::Debug;
-use std::process::id;
+use std::path::PathBuf;
 
-use iced::Alignment::Center;
-use iced::Background;
-use iced::Border;
 use iced::Element;
 use iced::Length;
-use iced::Length::Fill;
-use iced::Length::FillPortion;
-use iced::Length::Shrink;
-use iced::Pixels;
 use iced::Subscription;
 use iced::Task;
 use iced::Theme;
-use iced::advanced::graphics::futures::MaybeSend;
-use iced::alignment::Horizontal;
-use iced::alignment::Horizontal::Left;
-use iced::application::Update;
-use iced::border::Radius;
-use iced::theme::palette;
 use iced::widget;
-use iced::widget::PaneGrid;
-use iced::widget::Space;
-use iced::widget::button;
-use iced::widget::button::Style;
-use iced::widget::column;
-use iced::widget::container;
 use iced::widget::horizontal_rule;
 use iced::widget::pane_grid;
-use iced::widget::pane_grid::Target;
-use iced::widget::pane_grid::TitleBar;
-use iced::widget::rich_text;
-use iced::widget::row;
-use iced::widget::rule;
-use iced::widget::scrollable;
-use iced::widget::span;
 use iced::widget::text;
 use iced::widget::text_input;
 use iced::widget::text_input::default;
 use iced::window;
 use iced::window::Id;
-use iced::window::Settings;
-use iced_aw::Quad;
 use iced_aw::style::colors::WHITE;
 
+use crate::file_tree::FileTreeState;
 use crate::screens::Screen;
 use crate::subwindows::Subwindow;
 
@@ -55,6 +28,7 @@ mod screens;
 mod subwindows;
 mod top_bar;
 
+mod file_tree;
 mod project;
 
 #[derive(Debug, Clone)]
@@ -69,6 +43,8 @@ enum Message {
     ChangeScreen(Screen),
     NewProj,
     NewProjMessage(project_page::NewProjEvent),
+    FileTreeMessage(file_tree::FileTreeMessage),
+    Select(PathBuf),
     CloseProj,
     PaneResized(pane_grid::ResizeEvent),
     PaneSwap(pane_grid::DragEvent),
@@ -87,8 +63,10 @@ struct State {
     screen: Screen,
     statusline: String,
     panes: pane_grid::State<Pane>,
+    selected: Option<PathBuf>,
     project: Option<project::Project>,
     new_proj_state: project_page::NewProjState,
+    file_tree_state: file_tree::FileTreeState,
 }
 
 impl Default for State {
@@ -109,6 +87,8 @@ impl Default for State {
             screen: Screen::Home,
             new_proj_state: project_page::NewProjState::default(),
             statusline: String::new(),
+            file_tree_state: FileTreeState::default(),
+            selected: None,
         }
     }
 }
@@ -169,6 +149,15 @@ pub(crate) fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::NewProjMessage(new_proj_event) => {
             project_page::handle_new_proj_ev(&mut state.new_proj_state, new_proj_event)
         }
+        Message::FileTreeMessage(file_tree_event) => {
+            file_tree::file_tree_handle(&mut state.file_tree_state, file_tree_event)
+        }
+        Message::Select(path_buf) => {
+            if path_buf.exists() {
+                state.selected = Some(path_buf);
+            }
+            Task::none()
+        },
     }
 }
 

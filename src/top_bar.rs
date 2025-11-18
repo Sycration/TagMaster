@@ -1,5 +1,5 @@
-use crate::{Message, State, screens::Screen, subwindows::Subwindow, update};
-use iced::{Alignment::Center, Background, Element, Length::{self, Fill}, Task, Theme, widget::{self, Space, button, column, row, text, text_input}};
+use crate::{Message, State, screens::Screen, subwindows::Subwindow};
+use iced::{Alignment::Center, Background, Length::{self, Fill}, Theme, widget::{self, Space, button, row}};
 
 
 pub(crate) fn top_bar(state: &State) -> widget::Row<'_, Message> {
