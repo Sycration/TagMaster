@@ -1,5 +1,14 @@
 use crate::{Message, Pane, State, screens::Screen, subwindows::Subwindow, update};
-use iced::{Alignment::Center, Border, Element, Length::{self, Fill}, Task, Theme, border::Radius, widget::{self, Space, button, column, container, pane_grid, row, scrollable, text_input}};
+use iced::{
+    Alignment::Center,
+    Border, Element,
+    Length::{self, Fill},
+    Task, Theme,
+    border::Radius,
+    widget::{
+        self, Button, Column, Space, Text, button, column, container, pane_grid, row, scrollable, text, text_input
+    },
+};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct NewProjState {
@@ -59,12 +68,22 @@ pub(crate) fn new_project_view(state: &NewProjState) -> Element<Message> {
     .into()
 }
 
-
 pub(crate) fn project_page(state: &State) -> widget::Container<'_, Message> {
     container(
         pane_grid(&state.panes, |pane, state, _| {
             pane_grid::Content::new(
-                scrollable(container("data").padding(8)).height(Length::Fill),
+                scrollable(
+                    match state {
+                        Pane::FileList => {
+                            container((0..500).fold(Column::new(), |acc, x| acc.push(text(format!("File Number {x}")))))
+                        }
+                        Pane::DataEntry => container("Data Entry"),
+                        Pane::Viewer => container("Viewer"),
+                    }
+                    .padding(8),
+                )
+                .height(Length::Fill)
+                .width(Length::Fill)
             )
             .style(|theme: &Theme| {
                 let palette = theme.extended_palette();
@@ -99,5 +118,6 @@ pub(crate) fn project_page(state: &State) -> widget::Container<'_, Message> {
         .on_resize(6, Message::PaneResized)
         .on_drag(Message::PaneSwap)
         .spacing(3),
-    ).center_x(Length::Fill)
+    )
+    .center_x(Length::Fill)
 }

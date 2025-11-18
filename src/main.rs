@@ -47,13 +47,13 @@ use iced_aw::style::colors::WHITE;
 use crate::screens::Screen;
 use crate::subwindows::Subwindow;
 
+mod homepage;
+mod program_settings;
 mod project_page;
+mod project_settings;
 mod screens;
 mod subwindows;
 mod top_bar;
-mod homepage;
-mod program_settings;
-mod project_settings;
 
 mod project;
 
@@ -212,6 +212,3 @@ fn main_window(state: &State) -> Element<Message> {
         .padding(10)
         .into()
 }
-
-
-
