@@ -96,8 +96,8 @@ pub(crate) fn close_window(state: &mut State, sw: Subwindow) -> Task<Message> {
 
 pub(crate) fn close_window_by_id(state: &mut State, id: Id) -> Task<Message>{
             if Some(Subwindow::Main) == state.windows.iter().find(|x| x.0 == id).map(|x| x.1) {
-                update(state, Message::CloseProj);
-                window::close(id).chain(iced::exit())
+                let u = update(state, Message::CloseProj);
+                u.chain(window::close(id)).chain(iced::exit())
             } else {
                 let window = window::close(id);
                 state.windows.retain(|w| w.0 != id);

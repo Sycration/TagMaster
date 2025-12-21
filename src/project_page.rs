@@ -6,24 +6,22 @@ use iced::{
     Border, Element,
     Length::{self, Fill},
     Task, Theme,
+    advanced::graphics::text::cosmic_text::Font,
     border::Radius,
     widget::{
-        self, Column, Space, TextInput, button, column, container, pane_grid, row, scrollable,
-        text, text_input,
+        self, Button, Column, Row, Space, TextInput, button, column, container, pane_grid, row,
+        scrollable, text, text_input,
     },
 };
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct NewProjState {
-    name: String,
-    top_path: PathBuf,
+    top_url: String,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum NewProjEvent {
-    NameChange(String),
-    PickPath,
-    SetPath(PathBuf),
+    SetUrl(String),
 }
 
 pub(crate) fn close_project(state: &mut State) -> Task<Message> {
@@ -35,10 +33,8 @@ pub(crate) fn close_project(state: &mut State) -> Task<Message> {
 pub(crate) fn new_project(state: &mut State) -> Task<Message> {
     let go = update(state, Message::CloseProj)
         .chain(update(state, Message::CloseWindow(Subwindow::NewProject)));
-    state.project = Some(crate::project::Project {
-        name: state.new_proj_state.name.clone(),
-    });
-    state.file_tree_state.path = state.new_proj_state.top_path.clone();
+    state.project = Some(crate::project::Project {});
+    //state.file_tree_state.path = state.new_proj_state.top_url.clone();
     state.new_proj_state = NewProjState::default();
     state.screen = Screen::Project;
     go
@@ -46,37 +42,30 @@ pub(crate) fn new_project(state: &mut State) -> Task<Message> {
 
 pub(crate) fn handle_new_proj_ev(state: &mut NewProjState, ev: NewProjEvent) -> Task<Message> {
     match ev {
-        NewProjEvent::NameChange(n) => {
-            state.name = n;
-            Task::none()
-        }
-        NewProjEvent::PickPath => Task::perform(rfd::AsyncFileDialog::new().pick_folder(), |x| {
-            if let Some(f) = x.as_ref() {
-                return Message::NewProjMessage(NewProjEvent::SetPath(f.path().to_path_buf()));
-            }
-            Message::None
-        }),
-        NewProjEvent::SetPath(path_buf) => {
-            state.top_path = path_buf;
+        NewProjEvent::SetUrl(url) => {
+            state.top_url = url;
             Task::none()
         }
     }
 }
 
-pub(crate) fn new_project_view(state: &NewProjState) -> Element<Message> {
+pub(crate) fn new_project_view(state: &State) -> Element<Message> {
     column![
         "Create a new project",
-        text_input("Project Name", &state.name)
-            .on_input(|s| Message::NewProjMessage(NewProjEvent::NameChange(s))),
-        row![
-            button("Select directory").on_press(Message::NewProjMessage(NewProjEvent::PickPath)),
-            TextInput::new("path", &state.top_path.to_string_lossy()),
-        ],
+        column![
+            TextInput::new(
+                "https://berkeley.app.box.com/folder/123456789",
+                &state.new_proj_state.top_url
+            )
+            .on_input(|u| Message::NewProjMessage(NewProjEvent::SetUrl(u))),
+            text("Copy and paste the box folder URL here"),
+        ]
+        .spacing(10),
         row![
             Space::new(40, 0),
             button("Create")
                 .style(button::primary)
-                .on_press(Message::NewProj),
+                .on_press_maybe(state.box_token.as_ref().map(|_| Message::NewProj)),
             Space::new(Fill, 0),
             button("Cancel")
                 .style(button::secondary)

@@ -9,6 +9,15 @@ iced_aw = { version = "0.12", features = ["card"] }
 rfd = "0.15.4"
 webbrowser = "1.0.6"
 box = {path = "box-api", package = "openapi"}
+tokio = "1.48.0"
+axum = "0.8.7"
+anyhow = "1.0.100"
+serde = "1.0.228"
+serde_json = "1"
+reqwest = "0.12.24"
+rand = "0.9.2"
+port_check = "0.3.0"
+directories = "6.0.0"
 
 [profile.dev.package."*"]
 opt-level = 3

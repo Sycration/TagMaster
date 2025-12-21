@@ -28,7 +28,7 @@ pub(crate) fn top_bar(state: &State) -> widget::Row<'_, Message> {
                     widget::button(
                         row![
                             "Project: ",
-                            state.project.as_ref().map_or("", |x|x.name.as_str())
+                            state.project.as_ref().map_or("", |_|file!())
                         ]
                     )
                         .style(|theme: &Theme, _| {

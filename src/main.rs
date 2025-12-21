@@ -1,6 +1,10 @@
 use std::fmt::Debug;
+use std::io::Read;
+use std::path::Path;
 use std::path::PathBuf;
 
+use r#box::apis::configuration::Configuration;
+use r#box::models::AccessToken;
 use iced::Element;
 use iced::Length;
 use iced::Subscription;
@@ -28,6 +32,7 @@ mod project_settings;
 mod screens;
 mod subwindows;
 mod top_bar;
+mod box_login;
 
 mod file_tree;
 mod project;
@@ -45,6 +50,7 @@ enum Message {
     NewProj,
     NewProjMessage(project_page::NewProjEvent),
     FileTreeMessage(file_tree::FileTreeMessage),
+    ProgSetMessage(program_settings::ProgramSettingsMessage),
     Select(PathBuf),
     CloseProj,
     PaneResized(pane_grid::ResizeEvent),
@@ -68,6 +74,10 @@ struct State {
     project: Option<project::Project>,
     new_proj_state: project_page::NewProjState,
     file_tree_state: file_tree::FileTreeState,
+    program_set_state: program_settings::ProgramSettingsState,
+    box_token: Option<AccessToken>,
+    box_config: Configuration,
+    config_dir: PathBuf
 }
 
 impl Default for State {
@@ -81,6 +91,17 @@ impl Default for State {
             .0
             .split(pane_grid::Axis::Horizontal, flist.1, Pane::DataEntry)
             .unwrap();
+        let config_dir = directories::ProjectDirs::from("org", "GenEq", "TagMaster").map(|pd|pd.config_local_dir().to_path_buf()).unwrap_or(std::env::temp_dir());
+        let _ = std::fs::create_dir_all(&config_dir);
+
+        let token = std::fs::read_to_string(config_dir.join("auth.json")).ok().and_then(|json| {
+            serde_json::from_str::<AccessToken>(&json).ok()
+        });
+
+        let mut config = Configuration::default();
+        if let Some(t) = &token {
+            config.oauth_access_token = t.access_token.clone();
+        }
         Self {
             windows: vec![],
             panes: flist.0,
@@ -89,7 +110,11 @@ impl Default for State {
             new_proj_state: project_page::NewProjState::default(),
             statusline: String::new(),
             file_tree_state: FileTreeState::default(),
+            program_set_state: program_settings::ProgramSettingsState::default(),
             selected: None,
+            box_token: token,
+            box_config: config,
+            config_dir: config_dir,
         }
     }
 }
@@ -153,6 +178,9 @@ pub(crate) fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::FileTreeMessage(file_tree_event) => {
             file_tree::file_tree_handle(&mut state.file_tree_state, file_tree_event)
         }
+        Message::ProgSetMessage(prog_set_event) => {
+            program_settings::handle_prog_settings(state, prog_set_event)
+        }
         Message::Select(path_buf) => {
             if path_buf.exists() {
                 state.selected = Some(path_buf);
@@ -168,7 +196,7 @@ fn view(state: &State, window_id: window::Id) -> Element<Message> {
             Subwindow::Main => main_window(state),
             Subwindow::ProjectSettings => project_settings::project_settings(state),
             Subwindow::ProgramSettings => program_settings::program_settings(state),
-            Subwindow::NewProject => project_page::new_project_view(&state.new_proj_state),
+            Subwindow::NewProject => project_page::new_project_view(state),
         }
     } else {
         text(format!(
