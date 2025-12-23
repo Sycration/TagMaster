@@ -97,7 +97,7 @@ struct State {
 }
 
 static CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    let cd = directories::ProjectDirs::from("org", "GenEq", "TagMaster")
+    let cd = directories::ProjectDirs::from("org", "GenEq", "TagMonster")
         .map(|pd| pd.config_local_dir().to_path_buf())
         .unwrap_or(std::env::temp_dir());
     let _ = std::fs::create_dir_all(&cd);
@@ -133,7 +133,7 @@ pub fn main() -> iced::Result {
         update,
         view,
     )
-    .title("TagMaster")
+    .title("TagMonster")
     .theme(theme)
     .subscription(subscription)
     .run()

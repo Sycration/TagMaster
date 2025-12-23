@@ -4452,7 +4452,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tagmaster"
+name = "tagmonster"
 version = "0.1.0"
 dependencies = [
  "anyhow",

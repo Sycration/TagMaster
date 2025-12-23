@@ -41,7 +41,7 @@ pub(crate) fn handle_homepage_message(state: &mut State, msg: HomepageMessage) -
 pub(crate) fn homepage<'a>(state: &'a State) -> widget::Container<'a, Message> {
     container(
         column![
-            container(text("TagMaster").size(80)).height(80),
+            container(text("TagMonster").size(80)).height(80),
             Space::new().height(25),
             widget::rich_text([
                 span("A project by "),
@@ -124,7 +124,7 @@ pub(crate) fn homepage<'a>(state: &'a State) -> widget::Container<'a, Message> {
                     .underline(true),
                 span("\nSource code is available on "),
                 span("GitHub")
-                    .link("https://github.com/Sycration/TagMaster/tree/main")
+                    .link("https://github.com/Sycration/TagMonster/tree/main")
                     .underline(true)
             ])
             .on_link_click(|l: String| Message::OpenLink(l))
