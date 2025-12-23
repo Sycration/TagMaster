@@ -4460,6 +4460,7 @@ dependencies = [
  "directories",
  "iced",
  "iced_aw",
+ "image",
  "openapi",
  "port_check",
  "rand",

@@ -21,7 +21,9 @@ use iced::widget::text_input;
 use iced::widget::text_input::default;
 use iced::window;
 use iced::window::Id;
+use iced::window::icon;
 use iced_aw::style::colors::WHITE;
+use image::ImageFormat;
 use tokio::io::AsyncReadExt;
 use tokio_stream::wrappers::ReadDirStream;
 
@@ -127,6 +129,7 @@ pub fn main() -> iced::Result {
         update,
         view,
     )
+    .title("TagMaster")
     .theme(theme)
     .subscription(subscription)
     .run()
@@ -262,6 +265,7 @@ pub(crate) fn update(state: &mut State, message: Message) -> Task<Message> {
 }
 
 fn view(state: &State, window_id: window::Id) -> Element<Message> {
+
     if let Some(window) = &state.windows.iter().find(|x| x.0 == window_id) {
         match window.1 {
             Subwindow::Main => main_window(state),
@@ -280,6 +284,7 @@ fn view(state: &State, window_id: window::Id) -> Element<Message> {
 
 fn main_window(state: &State) -> Element<Message> {
     let top_bar = top_bar::top_bar(state);
+
 
     let body = match state.screen {
         Screen::Home => homepage::homepage(state),

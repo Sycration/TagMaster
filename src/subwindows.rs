@@ -1,8 +1,9 @@
 use crate::{Message, State, update};
 use iced::{
     Task,
-    window::{self, Id, Settings},
+    window::{self, Id, Settings, icon},
 };
+use image::ImageFormat;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum Subwindow {
@@ -76,7 +77,15 @@ pub(crate) fn open_window(state: &mut State, sw: Subwindow) -> Task<Message> {
             }
         }
     };
-    window.map(|_x| Message::None)
+    window.then(|id| {
+        let icon = icon::from_file_data(include_bytes!("../icon.png"), Some(ImageFormat::Png));
+
+        if let Ok(icon) = icon {
+            window::set_icon(id, icon)
+        } else {
+            Task::none()
+        }
+    })
 }
 
 pub(crate) fn close_window(state: &mut State, sw: Subwindow) -> Task<Message> {
@@ -94,13 +103,13 @@ pub(crate) fn close_window(state: &mut State, sw: Subwindow) -> Task<Message> {
     }
 }
 
-pub(crate) fn close_window_by_id(state: &mut State, id: Id) -> Task<Message>{
-            if Some(Subwindow::Main) == state.windows.iter().find(|x| x.0 == id).map(|x| x.1) {
-                let u = update(state, Message::CloseProj);
-                u.chain(window::close(id)).chain(iced::exit())
-            } else {
-                let window = window::close(id);
-                state.windows.retain(|w| w.0 != id);
-                window
-            }
-        }
+pub(crate) fn close_window_by_id(state: &mut State, id: Id) -> Task<Message> {
+    if Some(Subwindow::Main) == state.windows.iter().find(|x| x.0 == id).map(|x| x.1) {
+        let u = update(state, Message::CloseProj);
+        u.chain(window::close(id)).chain(iced::exit())
+    } else {
+        let window = window::close(id);
+        state.windows.retain(|w| w.0 != id);
+        window
+    }
+}
