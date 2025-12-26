@@ -151,9 +151,12 @@ pub(crate) fn file_tree_handle(state: &mut State, event: FileTreeMessage) -> Tas
                     )
                     .await
                 },
-                |f| match f {
+                move |f| match f {
                     Ok(folder) => Message::FileTreeMessage(FileTreeMessage::FolderReceived(folder)),
-                    Err(e) => Message::Debug(e.to_string()),
+                    Err(e) => {
+                        tracing::error!("Error fetching folder {}: {}", id, e);
+                        Message::None
+                    },
                 },
             )
         }
@@ -200,7 +203,10 @@ pub(crate) fn file_tree_handle(state: &mut State, event: FileTreeMessage) -> Tas
                 },
                 |f| match f {
                     Ok(items) => Message::FileTreeMessage(FileTreeMessage::UpdateReceived(items)),
-                    Err(e) => Message::Debug(e.to_string()),
+                    Err(e) => {
+                        tracing::error!("Error fetching folder items: {}", e);
+                        Message::None
+                    },
                 },
             )
         }

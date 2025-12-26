@@ -1,10 +1,18 @@
 use crate::{
-    CONFIG_DIR, Message, State, box_login::{self}, persist::persist, subwindows::Subwindow, update
+    CONFIG_DIR, Message, State,
+    box_login::{self},
+    persist::persist,
+    subwindows::Subwindow,
+    update,
 };
 use anyhow::Error;
 use r#box::models::AccessToken;
 use iced::{
-    Element, Length::Fill, Padding, Task, futures::FutureExt, widget::{Space, TextInput, button, column, row, space}
+    Element,
+    Length::Fill,
+    Padding, Task,
+    futures::FutureExt,
+    widget::{Space, TextInput, button, column, row, space},
 };
 use serde::{Deserialize, Serialize};
 
@@ -27,22 +35,34 @@ pub fn handle_prog_settings(state: &mut State, event: ProgramSettingsMessage) ->
         ProgramSettingsMessage::UpdateKey(k) => {
             state.program_set_state.box_key = k;
             let ps = state.program_set_state.clone();
-            Task::perform(async move {
-                match persist(&ps, &CONFIG_DIR, "settings").await {
-                    Ok(_) => Message::None,
-                    Err(e) => Message::Debug(e.to_string())
-                }
-            }, |x| x)
+            Task::perform(
+                async move {
+                    match persist(&ps, &CONFIG_DIR, "settings").await {
+                        Ok(_) => Message::None,
+                        Err(e) => {
+                            tracing::error!("Error saving settings: {}", e);
+                            Message::None
+                        }
+                    }
+                },
+                |x| x,
+            )
         }
         ProgramSettingsMessage::UpdateSecret(s) => {
             state.program_set_state.box_secret = s;
-                        let ps = state.program_set_state.clone();
-            Task::perform(async move {
-                match persist(&ps, &CONFIG_DIR, "settings").await {
-                    Ok(_) => Message::None,
-                    Err(e) => Message::Debug(e.to_string())
-                }
-            }, |x| x)
+            let ps = state.program_set_state.clone();
+            Task::perform(
+                async move {
+                    match persist(&ps, &CONFIG_DIR, "settings").await {
+                        Ok(_) => Message::None,
+                        Err(e) => {
+                            tracing::error!("Error saving settings: {}", e);
+                            Message::None
+                        }
+                    }
+                },
+                |x| x,
+            )
         }
         ProgramSettingsMessage::LoginButton => {
             let key = state.program_set_state.box_key.to_string();
@@ -55,9 +75,15 @@ pub fn handle_prog_settings(state: &mut State, event: ProgramSettingsMessage) ->
         ProgramSettingsMessage::Login(token_response) => match token_response {
             Ok(t) => {
                 state.box_token = Some(t);
-                update(state, Message::Debug(format!("Logged in successfully")))
+                update(state, {
+                    tracing::info!("Logged in successfully");
+                    Message::None
+                })
             }
-            Err(e) => update(state, Message::Debug(e.to_string())),
+            Err(e) => update(state, {
+                tracing::error!("Error logging in: {}", e);
+                Message::None
+            }),
         },
     }
 }

@@ -23,6 +23,7 @@ pub(crate) fn open_window(state: &mut State, sw: Subwindow) -> Task<Message> {
                     ..Default::default()
                 });
                 state.windows.push((window.0, sw));
+                tracing::debug!("Opened main window");
                 window.1
             } else {
                 Task::none()
@@ -39,6 +40,7 @@ pub(crate) fn open_window(state: &mut State, sw: Subwindow) -> Task<Message> {
                     ..Default::default()
                 });
                 state.windows.push((window.0, sw));
+                tracing::debug!("Opened project settings window");
                 window.1
             } else {
                 Task::none()
@@ -55,6 +57,7 @@ pub(crate) fn open_window(state: &mut State, sw: Subwindow) -> Task<Message> {
                     ..Default::default()
                 });
                 state.windows.push((window.0, sw));
+                tracing::debug!("Opened program settings window");
                 window.1
             } else {
                 Task::none()
@@ -71,6 +74,7 @@ pub(crate) fn open_window(state: &mut State, sw: Subwindow) -> Task<Message> {
                     ..Default::default()
                 });
                 state.windows.push((window.0, sw));
+                tracing::debug!("Opened new project window");
                 window.1
             } else {
                 Task::none()
@@ -92,8 +96,10 @@ pub(crate) fn close_window(state: &mut State, sw: Subwindow) -> Task<Message> {
     let old_windows = state.windows.clone();
     if let Some(id) = old_windows.iter().find(|x| x.1 == sw) {
         if id.1 == Subwindow::Main {
-            update(state, Message::CloseProj).chain(window::close(id.0).chain(iced::exit()))
+            tracing::debug!("Closing main window");
+            update(state, Message::CloseProj).chain(iced::exit())
         } else {
+            tracing::debug!("Closing {:?} window", sw);
             state.windows.retain(|w| w.1 != id.1);
             let window = window::close(id.0);
             window
@@ -106,10 +112,20 @@ pub(crate) fn close_window(state: &mut State, sw: Subwindow) -> Task<Message> {
 pub(crate) fn close_window_by_id(state: &mut State, id: Id) -> Task<Message> {
     if Some(Subwindow::Main) == state.windows.iter().find(|x| x.0 == id).map(|x| x.1) {
         let u = update(state, Message::CloseProj);
+        tracing::debug!("Closing main window");
         u.chain(window::close(id)).chain(iced::exit())
     } else {
         let window = window::close(id);
         state.windows.retain(|w| w.0 != id);
+        tracing::debug!(
+            "Closing {} window",
+            state
+                .windows
+                .iter()
+                .find(|x| x.0 == id)
+                .map(|x| format!("{:?}", x.1))
+                .unwrap_or(format!("unknown (id {id})"))
+        );
         window
     }
 }

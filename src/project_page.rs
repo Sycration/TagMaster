@@ -30,6 +30,11 @@ pub(crate) enum NewProjEvent {
 }
 
 pub(crate) fn close_project(state: &mut State) -> Task<Message> {
+    if let Some(proj) = &state.project {
+        tracing::info!("Closed project \"{}\"", proj.name);
+    } else {
+        tracing::info!("Closed project (no project open)");
+    }
     state.screen = Screen::Home;
     state.project = None;
     Task::none()
@@ -58,10 +63,8 @@ pub(crate) fn new_project(state: &mut State, project: Project) -> Task<Message> 
     //state.file_tree_state.path = state.new_proj_state.top_url.clone();
     state.new_proj_state = NewProjState::default();
     state.screen = Screen::Project;
-    go.chain(update(
-        state,
-        Message::Debug(format!("Created project \"{name}\"")),
-    ))
+    tracing::info!("Created new project \"{name}\"");
+    go
 }
 
 pub(crate) fn open_project(state: &mut State, project: Project) -> Task<Message> {
@@ -69,8 +72,8 @@ pub(crate) fn open_project(state: &mut State, project: Project) -> Task<Message>
     let id = project.top_folder_id;
     state.project = Some(project);
     state.screen = Screen::Project;
-    update(state, Message::FileTreeMessage(file_tree::FileTreeMessage::InitFolder(id))).chain(
-    update(state, Message::Debug(format!("Loaded project \"{name}\""))))
+    tracing::info!("Opened project \"{name}\"");
+    update(state, Message::FileTreeMessage(file_tree::FileTreeMessage::InitFolder(id)))
 }
 
 pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Message> {
@@ -84,8 +87,11 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
             let id: Result<usize, _> = url.split('/').last().unwrap_or("").parse();
             let id = match id {
                 Ok(id) => id,
-                Err(_) => {
-                    return update(state, Message::Debug("Invalid URL".to_string()));
+                Err(e) => {
+                    return update(state, {
+                        tracing::warn!("Invalid URL {}: {}", url, e);
+                        Message::None
+                    });
                 }
             };
 
@@ -115,7 +121,10 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
                             top_folder_id: id,
                             url: url.clone(),
                         }),
-                        Err(e) => Message::Debug(e.to_string()),
+                        Err(e) => {
+                            tracing::error!("Error fetching folder {}: {}", id, e);
+                            Message::None
+                        },
                     }
                 },
             )
