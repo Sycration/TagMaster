@@ -1,5 +1,5 @@
-use iced::Task;
 use crate::{Message, State};
+use iced::Task;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) enum Screen {

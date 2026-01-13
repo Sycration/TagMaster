@@ -36,9 +36,10 @@ impl InstalledFlowDelegate for BrowserDelegate {
 pub async fn google_login(
     client_id: String,
     client_secret: String,
-    persist_file: PathBuf
+    persist_file: PathBuf,
 ) -> anyhow::Result<Sheets<HttpsConnector<HttpConnector>>> {
-    let port = free_local_port_in_range(8080..=8090).ok_or(anyhow::format_err!("No free port available"))?;
+    let port = free_local_port_in_range(8080..=8090)
+        .ok_or(anyhow::format_err!("No free port available"))?;
     let secret = ApplicationSecret {
         client_id: client_id.to_string(),
         client_secret: client_secret.to_string(),

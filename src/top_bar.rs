@@ -1,6 +1,11 @@
 use crate::{Message, State, screens::Screen, subwindows::Subwindow};
-use iced::{Alignment::Center, Background, Length::{self, Fill}, Theme, widget::{self, Space, button, row}};
-
+use iced::{
+    Alignment::Center,
+    Background,
+    Length::{self, Fill},
+    Theme,
+    widget::{self, Space, button, row},
+};
 
 pub(crate) fn top_bar(state: &State) -> widget::Row<'_, Message> {
     let top_bar = row![
@@ -25,28 +30,26 @@ pub(crate) fn top_bar(state: &State) -> widget::Row<'_, Message> {
                         .on_press(Message::ChangeScreen(Screen::Home))
                         .into()
                 } else {
-                    widget::button(
-                        row![
-                            "Project: ",
-                            state.project.as_ref().map_or("", |p|&p.name)
-                        ]
-                    )
-                        .style(|theme: &Theme, _| {
-                            let palette = theme.extended_palette();
+                    widget::button(row![
+                        "Project: ",
+                        state.project.as_ref().map_or("", |p| &p.name)
+                    ])
+                    .style(|theme: &Theme, _| {
+                        let palette = theme.extended_palette();
 
-                            button::Style {
-                                background: Some(Background::Color(
-                                    if state.screen == Screen::Project {
-                                        palette.primary.strong.color
-                                    } else {
-                                        palette.secondary.strong.color
-                                    },
-                                )),
-                                ..Default::default()
-                            }
-                        })
-                        .on_press(Message::ChangeScreen(Screen::Project))
-                        .into()
+                        button::Style {
+                            background: Some(Background::Color(
+                                if state.screen == Screen::Project {
+                                    palette.primary.strong.color
+                                } else {
+                                    palette.secondary.strong.color
+                                },
+                            )),
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::ChangeScreen(Screen::Project))
+                    .into()
                 }
             }),
         )

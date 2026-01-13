@@ -6,5 +6,6 @@ pub(crate) struct Project {
     pub top_folder_id: usize,
     pub box_url: String,
     pub sheets_url: String,
-    pub sheet_id: i32
+    pub spreadsheet_id: String,
+    pub sheet_id: i32,
 }

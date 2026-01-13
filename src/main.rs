@@ -9,8 +9,8 @@ use r#box::apis::authorization_api::PostOauth2TokenRefreshParams;
 use r#box::apis::configuration::Configuration;
 use r#box::models::AccessToken;
 use r#box::models::Item;
-use derive_more::derive;
 use derive_more::Debug;
+use derive_more::derive;
 use google_sheets4::Sheets;
 use google_sheets4::hyper_rustls::HttpsConnector;
 use google_sheets4::hyper_util::client::legacy::connect::HttpConnector;
@@ -52,6 +52,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::wrappers::ReadDirStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::debug;
 use tracing::warn;
 
 use crate::file_tree::FileTreeState;
@@ -101,7 +102,8 @@ enum Message {
     PaneResized(pane_grid::ResizeEvent),
     PaneSwap(pane_grid::DragEvent),
     InitProgramSettings(ProgramSettingsState),
-    InitAccessToken(Option<AccessToken>),
+    InitBoxAccessToken(Option<AccessToken>),
+    InitGoogleToken,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,48 +249,48 @@ pub(crate) fn update(state: &mut State, message: Message) -> Task<Message> {
 
             state.panes = flist.0;
 
-            Task::batch([
-                Task::perform(
-                    async {
-                        let rd = tokio::fs::read_dir(CONFIG_DIR.join("projects")).await;
-                        match rd {
-                            Ok(mut rd) => {
-                                let mut projects = vec![];
-                                while let Ok(Some(f)) = rd.next_entry().await {
-                                    if let Ok(mut file) = tokio::fs::File::open(f.path()).await {
-                                        let mut contents = String::new();
-                                        if file.read_to_string(&mut contents).await.is_ok() {
-                                            match
-                                                serde_json::from_str::<Project>(&contents)
-                                            {
-                                                Ok(proj) => projects.push(proj),
-                                                Err(e) => warn!("Invalid project {} in project directory: {e}", f.file_name().to_string_lossy())
-                                            }
+            Task::perform(
+                async {
+                    let rd = tokio::fs::read_dir(CONFIG_DIR.join("projects")).await;
+                    match rd {
+                        Ok(mut rd) => {
+                            let mut projects = vec![];
+                            while let Ok(Some(f)) = rd.next_entry().await {
+                                if let Ok(mut file) = tokio::fs::File::open(f.path()).await {
+                                    let mut contents = String::new();
+                                    if file.read_to_string(&mut contents).await.is_ok() {
+                                        match serde_json::from_str::<Project>(&contents) {
+                                            Ok(proj) => projects.push(proj),
+                                            Err(e) => warn!(
+                                                "Invalid project {} in project directory: {e}",
+                                                f.file_name().to_string_lossy()
+                                            ),
                                         }
                                     }
                                 }
-                                projects
                             }
-                            Err(_e) => vec![],
+                            projects
                         }
-                    },
-                    |v| Message::HomepageMessage(homepage::HomepageMessage::InitProjects(v)),
-                ),
-                Task::perform(
-                    {
-                        async move {
-                            retrieve::<ProgramSettingsState>(&CONFIG_DIR, "settings")
-                                .await
-                                .unwrap_or_default()
-                        }
-                    },
-                    |res| Message::InitProgramSettings(res),
-                ),
-                Task::perform(
-                    { async move { retrieve::<AccessToken>(&CONFIG_DIR, "auth").await.ok() } },
-                    |res| Message::InitAccessToken(res),
-                ),
-            ])
+                        Err(_e) => vec![],
+                    }
+                },
+                |v| Message::HomepageMessage(homepage::HomepageMessage::InitProjects(v)),
+            )
+            .chain(Task::perform(
+                {
+                    async move {
+                        retrieve::<ProgramSettingsState>(&CONFIG_DIR, "settings")
+                            .await
+                            .unwrap_or_default()
+                    }
+                },
+                |res| Message::InitProgramSettings(res),
+            ))
+            .chain(Task::perform(
+                async move { retrieve::<AccessToken>(&CONFIG_DIR, "box_auth").await.ok() },
+                |res| Message::InitBoxAccessToken(res),
+            ))
+            .chain(Task::done(Message::InitGoogleToken))
             .chain(Task::perform(async {}, |_| Message::None))
             .chain(update(state, Message::OpenWindow(Subwindow::Main)))
         }
@@ -341,12 +343,37 @@ pub(crate) fn update(state: &mut State, message: Message) -> Task<Message> {
             state.program_set_state = program_settings_state;
             Task::none()
         }
-        Message::InitAccessToken(token_opt) => {
+        Message::InitBoxAccessToken(token_opt) => {
             if let Some(t) = &token_opt {
                 state.box_config.oauth_access_token = t.access_token.clone();
             }
             state.box_token = token_opt;
             Task::none()
+        }
+        Message::InitGoogleToken => {
+            if !state.program_set_state.gapi_key.is_empty()
+                && !state.program_set_state.gapi_secret.is_empty()
+            {
+                let client_id = state.program_set_state.gapi_key.clone();
+                let client_secret = state.program_set_state.gapi_secret.clone();
+                Task::perform(
+                    gapi_login::google_login(
+                        client_id,
+                        client_secret,
+                        CONFIG_DIR.join("gapi_token.json"),
+                    ),
+                    |x| {
+                        Message::ProgSetMessage(
+                            program_settings::ProgramSettingsMessage::LoginGoogle(
+                                x.map_err(|e| e.to_string()),
+                            ),
+                        )
+                    },
+                )
+            } else {
+                debug!("No Google API credentials set");
+                Task::none()
+            }
         }
         Message::HomepageMessage(homepage_message) => {
             homepage::handle_homepage_message(state, homepage_message)

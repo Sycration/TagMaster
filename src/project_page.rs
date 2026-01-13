@@ -128,7 +128,7 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
             Task::none()
         }
         NewProjEvent::SetSheetsUrl(url) => {
-            state.new_proj_state.top_url = url;
+            state.new_proj_state.sheets_url = url;
             Task::none()
         }
         NewProjEvent::NewProjButton => {
@@ -159,9 +159,8 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
             };
 
             let mut sheets_url = state.new_proj_state.sheets_url.clone();
-            let spreadsheet_id = sheets_url.split('/').nth_back(1);
-            let sheet_id: Result<i32, _> =
-                sheets_url.split('=').last().unwrap_or_default().parse();
+            let spreadsheet_id = sheets_url.split('/').nth_back(1).map(|s|s.to_string());
+            let sheet_id: Result<i32, _> = sheets_url.split('=').last().unwrap_or_default().parse();
             let (spreadsheet_id, sheet_id) = match (spreadsheet_id, sheet_id) {
                 (Some(sp), Ok(s)) => (sp.to_string(), s),
                 (None, _) => {
@@ -179,6 +178,8 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
             };
 
             let config = state.box_config.clone();
+
+            let s_id = spreadsheet_id.clone();
 
             Task::perform(
                 async move {
@@ -202,7 +203,7 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
                         },
                         async {
                             hub.spreadsheets()
-                                .get(&spreadsheet_id)
+                                .get(&s_id)
                                 .doit()
                                 .await
                                 .map_err(FetchJoinError::from)
@@ -210,9 +211,9 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
                                     let sheet_exists =
                                         s.1.sheets.as_ref().map_or(false, |sheets| {
                                             sheets.iter().any(|s| {
-                                                s.properties.as_ref().map_or(false, |p| {
-                                                    p.sheet_id == Some(sheet_id)
-                                                })
+                                                s.properties
+                                                    .as_ref()
+                                                    .map_or(false, |p| p.sheet_id == Some(sheet_id))
                                             })
                                         });
 
@@ -234,8 +235,8 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
                             top_folder_id: box_id,
                             box_url: box_url.clone(),
                             sheets_url: sheets_url,
-                            sheet_id: sheet_id
-
+                            spreadsheet_id: spreadsheet_id,
+                            sheet_id: sheet_id,
                         }),
                         Err(e) => match e {
                             FetchJoinError::BoxApi(error) => {
@@ -276,13 +277,13 @@ pub(crate) fn new_project_view(state: &State) -> Element<Message> {
             Space::new().height(10),
             TextInput::new(
                 "https://docs.google.com/spreadsheets/d/123456789/edit?gid=0#gid=0",
-                &state.new_proj_state.top_url
+                &state.new_proj_state.sheets_url
             )
             .on_input_maybe(
                 state
-                    .box_token
+                    .gapi_hub
                     .as_ref()
-                    .map(|_| |u| Message::NewProjMessage(NewProjEvent::SetBoxUrl(u)))
+                    .map(|_| |u| Message::NewProjMessage(NewProjEvent::SetSheetsUrl(u)))
             ),
             text("Copy and paste the Google Sheets URL here"),
         ]

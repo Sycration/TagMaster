@@ -1,11 +1,12 @@
-
 use r#box::{
     apis::{configuration, folders_api::GetFoldersIdItemsParams},
     models::{FolderFull, FolderMini, Item, Items},
 };
 use iced::{
     Alignment::Center,
-    Element, Length::{self, Fill}, Task,
+    Element,
+    Length::{self, Fill},
+    Task,
     advanced::{Widget, widget::Text},
     widget::{Button, Column, Row, Space, button, column, row, text},
 };
@@ -115,9 +116,9 @@ pub(crate) fn title_bar(state: &State) -> Element<Message> {
             .align_y(Center)
             .width(Length::Shrink),
         Space::new().width(Fill),
-        button("⟳").height(Length::Fill).on_press(
-            Message::FileTreeMessage(FileTreeMessage::Update)
-        ),
+        button("⟳")
+            .height(Length::Fill)
+            .on_press(Message::FileTreeMessage(FileTreeMessage::Update)),
     ]
     .height(28)
     .into()
@@ -156,7 +157,7 @@ pub(crate) fn file_tree_handle(state: &mut State, event: FileTreeMessage) -> Tas
                     Err(e) => {
                         tracing::error!("Error fetching folder {}: {}", id, e);
                         Message::None
-                    },
+                    }
                 },
             )
         }
@@ -166,7 +167,19 @@ pub(crate) fn file_tree_handle(state: &mut State, event: FileTreeMessage) -> Tas
             {
                 if project.top_folder_id == new_folder_id {
                     state.file_tree_state.parents.clear();
-                } else if state.file_tree_state.contents.iter().filter_map(|i|if let Item::FolderMini(f) = i {Some(f)} else {None}).any(|i|i.id ==new_folder_id.to_string()){
+                } else if state
+                    .file_tree_state
+                    .contents
+                    .iter()
+                    .filter_map(|i| {
+                        if let Item::FolderMini(f) = i {
+                            Some(f)
+                        } else {
+                            None
+                        }
+                    })
+                    .any(|i| i.id == new_folder_id.to_string())
+                {
                     state
                         .file_tree_state
                         .parents
@@ -206,7 +219,7 @@ pub(crate) fn file_tree_handle(state: &mut State, event: FileTreeMessage) -> Tas
                     Err(e) => {
                         tracing::error!("Error fetching folder items: {}", e);
                         Message::None
-                    },
+                    }
                 },
             )
         }
@@ -219,7 +232,7 @@ pub(crate) fn file_tree_handle(state: &mut State, event: FileTreeMessage) -> Tas
             } else {
                 Task::none()
             }
-        },
+        }
         FileTreeMessage::UpdateReceived(items) => {
             state.file_tree_state.contents = items.entries.unwrap_or(vec![]);
             Task::none()

@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 pub struct ProgramSettingsState {
     box_key: String,
     box_secret: String,
-    gapi_key: String,
-    gapi_secret: String,
+    pub gapi_key: String,
+    pub gapi_secret: String,
 }
 
 #[derive(Clone)]
@@ -94,32 +94,29 @@ pub fn handle_prog_settings(state: &mut State, event: ProgramSettingsMessage) ->
             Err(e) => {
                 state.box_token = None;
                 tracing::error!("Error logging in Box: {}", e);
-                update(state, {
-                
-                Message::None
-            })},
+                update(state, { Message::None })
+            }
         },
         ProgramSettingsMessage::LoginGoogle(r) => match r {
             Ok(s) => {
                 state.gapi_hub = Some(s);
                 tracing::info!("Logged in Google successfully");
-                update(state, {
-                    Message::None
-                })
+                update(state, { Message::None })
             }
             Err(e) => {
                 state.gapi_hub = None;
                 tracing::error!("Error logging in Google: {}", e);
-                update(state, {
-                Message::None
-            })},
+                update(state, { Message::None })
+            }
         },
         ProgramSettingsMessage::LoginGoogleButton => {
             let key = state.program_set_state.gapi_key.to_string();
             let secret = state.program_set_state.gapi_secret.to_string();
             let file = CONFIG_DIR.join("gapi_token.json");
             Task::perform(gapi_login::google_login(key, secret, file), |x| {
-                Message::ProgSetMessage(ProgramSettingsMessage::LoginGoogle(x.map_err(|e|e.to_string())))
+                Message::ProgSetMessage(ProgramSettingsMessage::LoginGoogle(
+                    x.map_err(|e| e.to_string()),
+                ))
             })
         }
     }

@@ -3,12 +3,12 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
-use tracing::{Event, Level, Subscriber};
 use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::Context;
-use tracing_subscriber::{fmt, layer::SubscriberExt, registry::Registry, Layer};
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{Layer, fmt, layer::SubscriberExt, registry::Registry};
 
 use crate::CONFIG_DIR;
 
@@ -18,38 +18,47 @@ struct FieldVisitor {
 
 impl FieldVisitor {
     fn new() -> Self {
-        Self { fields: BTreeMap::new() }
+        Self {
+            fields: BTreeMap::new(),
+        }
     }
 }
 
 impl Visit for FieldVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        self.fields.insert(field.name().to_string(), format!("{:?}", value));
+        self.fields
+            .insert(field.name().to_string(), format!("{:?}", value));
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        self.fields.insert(field.name().to_string(), format!("{:?}", value));
+        self.fields
+            .insert(field.name().to_string(), format!("{:?}", value));
     }
 
     // Fallback for other numeric types
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 }
 
@@ -60,7 +69,9 @@ pub struct GuiLayer {
 
 impl GuiLayer {
     pub fn new(sender: Sender<(String, tracing::Level)>) -> Self {
-        Self { sender: Arc::new(sender) }
+        Self {
+            sender: Arc::new(sender),
+        }
     }
 }
 
@@ -90,12 +101,11 @@ impl<S: Subscriber> Layer<S> for GuiLayer {
 
         let level_str = match *level {
             Level::ERROR => "[ERROR]",
-            Level::WARN =>  " [WARN]",
-            Level::INFO =>  " [INFO]",
+            Level::WARN => " [WARN]",
+            Level::INFO => " [INFO]",
             Level::DEBUG => "[DEBUG]",
             Level::TRACE => "[TRACE]",
         };
-
 
         let line = (format!("{} {} - {}", level_str, target, payload), *level);
 
@@ -110,7 +120,9 @@ pub struct LoggingGuard {
 
 impl LoggingGuard {
     fn new(worker_guard: WorkerGuard) -> Self {
-        Self { _worker_guard: worker_guard }
+        Self {
+            _worker_guard: worker_guard,
+        }
     }
 }
 
