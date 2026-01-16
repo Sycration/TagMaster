@@ -57,7 +57,7 @@ pub async fn get_key(
     let token: AccessToken = match serde_json::from_str::<AccessToken>(&s) {
         std::result::Result::Ok(t) => t,
         Err(_) => {
-            let port = free_local_port_in_range(8080..=8090)
+            let port = free_local_port_in_range(8080..=8085)
                 .ok_or(anyhow::anyhow!("No free ports available"))?;
 
             let redirect_uri = format!("http://localhost:{port}");

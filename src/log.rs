@@ -76,8 +76,16 @@ impl GuiLayer {
 }
 
 impl<S: Subscriber> Layer<S> for GuiLayer {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let meta = event.metadata();
+        let line = meta.line();
+        let location = meta.file().map(|f| {
+            if let Some(line) = line {
+                format!("{f}:{line}")
+            } else {
+                f.to_string()
+            }
+        });
         let level = meta.level();
         let target = meta.target();
 
@@ -107,7 +115,19 @@ impl<S: Subscriber> Layer<S> for GuiLayer {
             Level::TRACE => "[TRACE]",
         };
 
-        let line = (format!("{} {} - {}", level_str, target, payload), *level);
+        let line = (
+            format!(
+                "{} {} - {}",
+                level_str,
+                if let Some(l) = location {
+                    l
+                } else {
+                    target.to_string()
+                },
+                payload
+            ),
+            *level,
+        );
 
         let _ = self.sender.send(line);
     }
@@ -142,11 +162,15 @@ pub fn init_logging(gui_sender: Sender<(String, tracing::Level)>) -> anyhow::Res
     let stderr_layer = fmt::layer()
         .with_writer(std::io::stderr)
         .with_ansi(atty::is(atty::Stream::Stderr))
+        .with_file(true)
+        .with_line_number(true)
         .with_filter(filter::EnvFilter::from_default_env());
 
     let file_layer = fmt::layer()
         .with_writer(non_blocking_file)
         .with_ansi(false)
+        .with_file(true)
+        .with_line_number(true)
         .with_filter(filter::EnvFilter::from_default_env());
 
     let gui_layer = GuiLayer::new(gui_sender).with_filter(filter::EnvFilter::from_default_env());

@@ -38,7 +38,7 @@ pub async fn google_login(
     client_secret: String,
     persist_file: PathBuf,
 ) -> anyhow::Result<Sheets<HttpsConnector<HttpConnector>>> {
-    let port = free_local_port_in_range(8080..=8090)
+    let port = free_local_port_in_range(8086..=8090)
         .ok_or(anyhow::format_err!("No free port available"))?;
     let secret = ApplicationSecret {
         client_id: client_id.to_string(),

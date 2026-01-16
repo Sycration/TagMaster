@@ -1,7 +1,12 @@
-use std::{env::current_dir, path::PathBuf};
+use std::{
+    env::current_dir,
+    io::{BufReader, Cursor},
+    path::PathBuf,
+    usize,
+};
 
 use crate::{
-    CONFIG_DIR, Message, Pane, State, file_tree, homepage, persist, project::Project,
+    CONFIG_DIR, Message, Pane, State, TEMPLATE_ID, file_tree, homepage, persist, project::Project,
     screens::Screen, subwindows::Subwindow, update,
 };
 use r#box::{
@@ -9,11 +14,15 @@ use r#box::{
         downloads_api::{GetFilesIdContentParams, get_files_id_content},
         files_api::GetFilesIdParams,
         folders_api::{GetFoldersIdItemsParams, GetFoldersIdParams},
+        users_api::GetUsersMeParams,
         zip_downloads_api::PostZipDownloadsParams,
     },
-    models::{ZipDownloadRequest, ZipDownloadRequestItemsInner},
+    models::{ZipDownloadRequest, ZipDownloadRequestItemsInner, file__full},
 };
-use google_sheets4::api::Spreadsheet;
+use google_sheets4::{
+    FieldMask,
+    api::{BatchUpdateSpreadsheetRequest, Spreadsheet},
+};
 use iced::{
     Alignment::Center,
     Border, Element,
@@ -21,15 +30,18 @@ use iced::{
     Task, Theme,
     advanced::graphics::text::cosmic_text::Font,
     border::Radius,
+    futures::{FutureExt, TryFutureExt},
     widget::{
         self, Button, Column, Row, Space, TextInput, button, column, container, pane_grid, row,
         scrollable, text, text_input,
     },
 };
+use pure_magic::MagicDb;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_stream::StreamExt;
-use tracing::error;
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct NewProjState {
@@ -41,7 +53,24 @@ pub(crate) struct NewProjState {
 pub(crate) enum NewProjEvent {
     SetBoxUrl(String),
     SetSheetsUrl(String),
+    MakeSheet(Project, Node),
     NewProjButton,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Node {
+    name: String,
+    file_type: InternalType,
+    id: String,
+    web_link: String,
+    children: Option<Vec<Node>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, Eq, PartialEq)]
+enum InternalType {
+    File,
+    Link,
+    Folder,
 }
 
 pub(crate) fn close_project(state: &mut State) -> Task<Message> {
@@ -55,20 +84,134 @@ pub(crate) fn close_project(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
+async fn build_folder_tree(
+    configuration: r#box::apis::configuration::Configuration,
+    folder_id: String,
+    hostname: String,
+) -> Result<Node, String> {
+    use r#box::apis::folders_api::GetFoldersIdItemsParams;
+
+    fn fetch_children(
+        configuration: r#box::apis::configuration::Configuration,
+        folder_id: String,
+        hostname: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Node>, String>> + Send>>
+    {
+        Box::pin(async move {
+            let listing = r#box::apis::folders_api::get_folders_id_items(
+                &configuration,
+                GetFoldersIdItemsParams {
+                    folder_id: folder_id.clone(),
+                    fields: None,
+                    boxapi: None,
+                    marker: None,
+                    usemarker: None,
+                    sort: None,
+                    direction: None,
+                    offset: None,
+                    limit: None,
+                },
+            )
+            .await
+            .map_err(|e| format!("Box API error listing folder {}: {}", folder_id, e))?;
+
+            let entries = listing.entries.unwrap_or_default();
+            let mut nodes: Vec<Node> = Vec::with_capacity(entries.len());
+
+            for entry in entries.into_iter() {
+                match entry {
+                    r#box::models::Item::FileFull(f) => {
+                        nodes.push(Node {
+                            name: f.name.unwrap_or_else(|| "UNNAMED FILE".to_string()),
+                            web_link: format!("{}/file/{}", hostname.trim_end_matches('/'), &f.id),
+                            id: f.id,
+                            file_type: InternalType::File,
+                            children: None,
+                        });
+                    }
+                    r#box::models::Item::FolderMini(f) => {
+                        let child_node =
+                            fetch_children(configuration.clone(), f.id.clone(), hostname.clone())
+                                .await?;
+                        nodes.push(Node {
+                            name: f.name.unwrap_or_else(|| "UNNAMED FOLDER".to_string()),
+                            web_link: format!(
+                                "{}/folder/{}",
+                                hostname.trim_end_matches('/'),
+                                &f.id
+                            ),
+                            id: f.id,
+                            file_type: InternalType::Folder,
+                            children: Some(child_node),
+                        });
+                    }
+                    r#box::models::Item::WebLink(f) => {
+                        nodes.push(Node {
+                            name: f.name.unwrap_or_else(|| "UNNAMED LINK".to_string()),
+                            web_link: format!(
+                                "{}/web_link/{}",
+                                hostname.trim_end_matches('/'),
+                                &f.id
+                            ),
+                            id: f.id,
+                            file_type: InternalType::Link,
+                            children: None,
+                        });
+                    }
+                };
+            }
+
+            Ok(nodes)
+        })
+    }
+
+    // Build the root node for the provided folder id
+    let root_listing = r#box::apis::folders_api::get_folders_id(
+        &configuration,
+        r#box::apis::folders_api::GetFoldersIdParams {
+            folder_id: folder_id.clone(),
+            fields: None,
+            if_none_match: None,
+            boxapi: None,
+            sort: None,
+            direction: None,
+            offset: None,
+            limit: None,
+        },
+    )
+    .await
+    .map_err(|e| format!("Box API error fetching folder {}: {}", folder_id, e))?;
+
+    let root_name = root_listing
+        .name
+        .unwrap_or_else(|| format!("Folder {}", folder_id));
+    let children =
+        fetch_children(configuration.clone(), folder_id.clone(), hostname.clone()).await?;
+
+    Ok(Node {
+        name: root_name,
+        id: folder_id,
+        web_link: format!(
+            "{}/folder/{}",
+            hostname.trim_end_matches('/'),
+            root_listing.id
+        ),
+        children: Some(children),
+        file_type: InternalType::Folder,
+    })
+}
+
 pub(crate) fn new_project(state: &mut State, project: Project) -> Task<Message> {
     let name = project.name.clone();
+    if let Err(e) = std::fs::create_dir_all(CONFIG_DIR.join("projects").join(&name)) {
+        warn!("Failed to create project subdirectory: {}", e);
+    }
     let go = Task::batch([
         update(state, Message::CloseProj),
         update(state, Message::CloseWindow(Subwindow::NewProject)),
         update(
             state,
             Message::HomepageMessage(homepage::HomepageMessage::AddProject(project.clone())),
-        ),
-        update(
-            state,
-            Message::FileTreeMessage(file_tree::FileTreeMessage::InitFolder(
-                project.top_folder_id,
-            )),
         ),
         Task::perform(
             {
@@ -77,71 +220,69 @@ pub(crate) fn new_project(state: &mut State, project: Project) -> Task<Message> 
                 async move { persist::persist(&project, &dir, project.name.as_str()).await }
             },
             |_| Message::None,
-        ).chain({
+        )
+        .chain({
             let configuration = state.box_config.clone();
-            let project = project.clone();
+            let project_future = project.clone();
+            let project_callback = project.clone();
             let client = state.box_config.client.clone();
-            let token = state.box_token.as_ref().and_then(|x|x.access_token.clone()).unwrap_or_default();
-        Task::perform(async move {
-            let result: Result<(), String> = async {
-                let z = r#box::apis::zip_downloads_api::post_zip_downloads(
-                    &configuration,
-                    PostZipDownloadsParams {
-                        zip_download_request: Some(ZipDownloadRequest {
-                            items: vec![
-                                ZipDownloadRequestItemsInner {
-                                    r#type: r#box::models::zip_download_request_items_inner::Type::Folder,
-                                    id: project.top_folder_id.to_string(),
-                                },
-                            ],
-                            download_file_name: Some(project.name.clone()),
-                        }),
-                    },
-                )
-                .await
-                .map_err(|e| format!("Failed to retrieve ZIP URL: {}", e))?;
+            let token = state
+                .box_token
+                .as_ref()
+                .and_then(|x| x.access_token.clone())
+                .unwrap_or_default();
+            Task::perform(
+                async move {
+                    // Build a simple tree of nodes with name, id and web_link, recursively.
 
-                let url = z
-                    .download_url
-                    .ok_or_else(|| "ZIP URL had no URL in it".to_string())?;
+                    let box_url = project_future.box_url.clone();
+                    let hostname = box_url.split('/').take(3).collect::<Vec<&str>>().join("/");
 
-                let resp = client
-                    .get(url)
-                    .bearer_auth(token)
-                    .send()
+                    match build_folder_tree(
+                        configuration.clone(),
+                        project_future.top_folder_id.to_string(),
+                        hostname,
+                    )
                     .await
-                    .map_err(|e| format!("Failed to open ZIP URL: {}", e))?;
-
-                let mut file = File::create(
-                    &CONFIG_DIR.join("projects").join(project.name + ".zip"),
-                )
-                .await
-                .map_err(|e| format!("Failed to create ZIP file: {}", e))?;
-
-                let mut content = resp.bytes_stream();
-
-                while let Some(chunk) = content.next().await {
-                    let chunk = chunk
-                        .map_err(|e| format!("Failed to download ZIP chunk: {}", e))?;
-                    file.write_all(&chunk)
-                        .await
-                        .map_err(|e| format!("Failed to write ZIP chunk: {}", e))?;
-                }
-
-                file.flush()
-                    .await
-                    .map_err(|e| format!("Failed to flush ZIP file: {}", e))?;
-
-                Ok::<(), String>(())
-            }
-            .await;
-
-            // Log any error that occurred in the async block.
-            if let Err(e) = result {
-                tracing::error!("Failed to download project ZIP: {}", e);
-            }
-        }, |res| Message::None)
+                    {
+                        Ok(tree) => {
+                            tracing::info!(
+                                "Built project tree for {}: {:#?}",
+                                project_future.name,
+                                tree
+                            );
+                            // Optionally persist the tree to disk for later use
+                            let proj_name = project_future.name.clone();
+                            persist::persist(
+                                &tree,
+                                &CONFIG_DIR.join("projects").join(&proj_name),
+                                &(proj_name + "_tree"),
+                            )
+                            .await;
+                            Ok(tree)
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to build folder tree for {}: {}",
+                                project_future.name,
+                                e
+                            );
+                            Err(e)
+                        }
+                    }
+                },
+                move |tree| match tree {
+                    Ok(t) => Message::NewProjMessage(NewProjEvent::MakeSheet(project_callback, t)),
+                    Err(_) => todo!(),
+                },
+            )
         })
+        .chain(update(
+            state,
+            Message::FileTreeMessage(file_tree::FileTreeMessage::InitFolder(
+                project.top_folder_id,
+            )),
+        )),
     ]);
     state.project = Some(project);
     //state.file_tree_state.path = state.new_proj_state.top_url.clone();
@@ -149,6 +290,76 @@ pub(crate) fn new_project(state: &mut State, project: Project) -> Task<Message> 
     state.screen = Screen::Project;
     tracing::info!("Created new project \"{name}\"");
     go
+}
+
+async fn download_zip(
+    configuration: r#box::apis::configuration::Configuration,
+    project: Project,
+    client: Client,
+    token: String,
+) -> Result<(File, PathBuf), String> {
+    let result: Result<(File, PathBuf), String> = async {
+        let path = &CONFIG_DIR
+            .join("projects")
+            .join(project.name.clone() + ".zip");
+        let z = r#box::apis::zip_downloads_api::post_zip_downloads(
+            &configuration,
+            PostZipDownloadsParams {
+                zip_download_request: Some(ZipDownloadRequest {
+                    items: vec![ZipDownloadRequestItemsInner {
+                        r#type: r#box::models::zip_download_request_items_inner::Type::Folder,
+                        id: project.top_folder_id.to_string(),
+                    }],
+                    download_file_name: Some(project.name.clone()),
+                }),
+            },
+        )
+        .await
+        .map_err(|e| format!("Failed to retrieve ZIP URL: {}", e))?;
+
+        let url = z
+            .download_url
+            .ok_or_else(|| "ZIP URL had no URL in it".to_string())?;
+
+        let resp = client
+            .get(url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to open ZIP URL: {}", e))?;
+
+        let mut file = File::create(path)
+            .await
+            .map_err(|e| format!("Failed to create ZIP file: {}", e))?;
+
+        let mut content = resp.bytes_stream();
+
+        while let Some(chunk) = content.next().await {
+            let chunk = chunk.map_err(|e| format!("Failed to download ZIP chunk: {}", e))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("Failed to write ZIP chunk: {}", e))?;
+        }
+
+        file.flush()
+            .await
+            .map_err(|e| format!("Failed to flush ZIP file: {}", e))?;
+
+        Ok::<(File, PathBuf), String>((file, path.clone()))
+    }
+    .await;
+    if let Err(e) = &result {
+        tracing::error!("{}", e);
+    } else {
+        info!(
+            "Downloaded folder {}",
+            &CONFIG_DIR
+                .join("projects")
+                .join(project.name + ".zip")
+                .to_string_lossy()
+        )
+    }
+    result
 }
 
 pub(crate) fn open_project(state: &mut State, project: Project) -> Task<Message> {
@@ -233,7 +444,7 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
                 }
             };
 
-            let mut sheets_url = state.new_proj_state.sheets_url.clone();
+            let sheets_url = state.new_proj_state.sheets_url.clone();
             let spreadsheet_id = sheets_url.split('/').nth_back(1).map(|s| s.to_string());
             let sheet_id: Result<i32, _> = sheets_url.split('=').last().unwrap_or_default().parse();
             let (spreadsheet_id, sheet_id) = match (spreadsheet_id, sheet_id) {
@@ -325,6 +536,478 @@ pub(crate) fn handle_new_proj_ev(state: &mut State, ev: NewProjEvent) -> Task<Me
                     }
                 },
             )
+        }
+        NewProjEvent::MakeSheet(project, tree) => {
+            let hub = if let Some(hub) = state.gapi_hub.clone() {
+                hub
+            } else {
+                error!("Not logged in with google");
+                return Task::done(Message::None);
+            };
+
+            // Clone any parts of `state` we will need inside the 'static async task.
+            let box_config = state.box_config.clone();
+
+            Task::perform(
+                async move {
+                    // Flatten the tree into a Vec with folders before files at each level.
+                    let mut flat: Vec<Node> = Vec::new();
+
+                    fn flatten_node(node: &Node, out: &mut Vec<Node>) {
+                        // push the folder/file itself (as a flattened entry with no children)
+                        out.push(Node {
+                            name: node.name.clone(),
+                            file_type: node.file_type,
+                            id: node.id.clone(),
+                            web_link: node.web_link.clone(),
+                            children: None,
+                        });
+
+                        if let Some(children) = &node.children {
+                            // separate folders and files
+                            let mut folders: Vec<&Node> = Vec::new();
+                            let mut files: Vec<&Node> = Vec::new();
+                            for c in children {
+                                if c.children.is_some() {
+                                    folders.push(c);
+                                } else {
+                                    files.push(c);
+                                }
+                            }
+
+                            // recurse into folders first
+                            for f in folders {
+                                flatten_node(f, out);
+                            }
+
+                            // then append files
+                            for file in files {
+                                out.push(Node {
+                                    name: file.name.clone(),
+                                    id: file.id.clone(),
+                                    web_link: file.web_link.clone(),
+                                    file_type: file.file_type,
+                                    children: None,
+                                });
+                            }
+                        }
+                    }
+
+                    flatten_node(&tree, &mut flat);
+
+                    tracing::info!(
+                        "Flattened tree for {}: {} entries",
+                        project.name,
+                        flat.len()
+                    );
+                    // persist flattened list for later use
+                    let _ = persist::persist(
+                        &flat,
+                        &CONFIG_DIR.join("projects").join(&project.name),
+                        &(project.name.clone() + "_flat"),
+                    )
+                    .await;
+
+                    let copy_req = google_sheets4::api::CopySheetToAnotherSpreadsheetRequest {
+                        destination_spreadsheet_id: Some(project.spreadsheet_id.clone()),
+                    };
+                    match hub
+                        .spreadsheets()
+                        .sheets_copy_to(copy_req, TEMPLATE_ID, 0)
+                        .doit()
+                        .await
+                    {
+                        Ok((_resp, props)) => {
+                            tracing::info!(
+                                "Copied template sheet 0 from {} into {}",
+                                TEMPLATE_ID,
+                                project.spreadsheet_id
+                            );
+
+                            rename_new_sheet(&project, hub.clone(), props).await;
+
+                            // Set B1 to "(x Folders) (y Files)" for top-level children, and C1 to a hyperlink to the top-level folder.
+                            let top_children: &[Node] =
+                                tree.children.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+
+                            let mut folder_count = 0usize;
+                            let mut file_count = 0usize;
+
+                            for c in top_children.iter() {
+                                if c.file_type == InternalType::Folder {
+                                    folder_count += 1;
+                                } else {
+                                    file_count += 1;
+                                }
+                            }
+
+                            let b1_text =
+                                format!("({} Folders) ({} Files)", folder_count, file_count);
+
+                            let safe_title = project.name.replace('\'', "''");
+                            let range_b1 = format!("'{}'!B1", safe_title);
+
+                            let vr_b1 = google_sheets4::api::ValueRange {
+                                range: Some(range_b1.clone()),
+                                major_dimension: None,
+                                values: Some(vec![vec![serde_json::Value::String(b1_text)]]),
+                            };
+
+                            match hub
+                                .spreadsheets()
+                                .values_update(vr_b1, project.spreadsheet_id.as_str(), &range_b1)
+                                .value_input_option("USER_ENTERED")
+                                .doit()
+                                .await
+                            {
+                                Ok((_resp, _)) => {
+                                    tracing::info!("Set {} -> {}", range_b1, "B1");
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to set B1: {}", e);
+                                }
+                            }
+
+                            let esc_name = project.name.replace('"', "\\\"");
+                            let esc_url = project.box_url.replace('"', "\\\"");
+                            let formula = format!("=HYPERLINK(\"{}\",\"{}\")", esc_url, esc_name);
+                            let range_c1 = format!("'{}'!C1", safe_title);
+                            let vr_c1 = google_sheets4::api::ValueRange {
+                                range: Some(range_c1.clone()),
+                                major_dimension: None,
+                                values: Some(vec![vec![serde_json::Value::String(formula)]]),
+                            };
+
+                            match hub
+                                .spreadsheets()
+                                .values_update(vr_c1, &project.spreadsheet_id, &range_c1)
+                                .value_input_option("USER_ENTERED")
+                                .doit()
+                                .await
+                            {
+                                Ok((_resp, _)) => {
+                                    tracing::info!("Set {} -> {}", range_c1, "C1 (hyperlink)");
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to set C1: {}", e);
+                                }
+                            }
+
+                            tokio::join!(
+                                create_filetype_tags(&project, hub.clone(), box_config.clone(), &flat),
+                                create_folder_names(&project, hub.clone(), &flat),
+                                create_file_names(&project, hub.clone(), &flat),
+                            );
+                                
+
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to copy template sheet: {}", e);
+                        }
+                    }
+
+                    anyhow::Ok(())
+                },
+                |_| Message::None,
+            )
+        }
+    }
+}
+
+async fn create_folder_names(
+    project: &Project,
+    hub: google_sheets4::Sheets<
+        google_sheets4::hyper_rustls::HttpsConnector<
+            google_sheets4::hyper_util::client::legacy::connect::HttpConnector,
+        >,
+    >,
+    flat: &Vec<Node>,
+) {
+    // Write folder hyperlinks and "Loose files:" markers in one pass.
+    let flat_entries = flat.clone();
+    let safe_title = project.name.replace('\'', "''");
+    let mut last_was_folder = false;
+    for (i, node) in flat_entries.into_iter().enumerate().skip(1) {
+        let row = 2 + (i - 1);
+
+        match node.file_type {
+            InternalType::Folder => {
+                last_was_folder = true;
+
+                let esc_name = node.name.replace('"', "\\\"");
+                let esc_url = node.web_link.replace('"', "\\\"");
+                let formula = format!("=HYPERLINK(\"{}\",\"{}\")", esc_url, esc_name);
+                let range = format!("'{}'!C{}", safe_title, row);
+                let vr = google_sheets4::api::ValueRange {
+                    range: Some(range.clone()),
+                    major_dimension: None,
+                    values: Some(vec![vec![serde_json::Value::String(formula)]]),
+                };
+
+                match hub
+                    .spreadsheets()
+                    .values_update(vr, &project.spreadsheet_id, &range)
+                    .value_input_option("USER_ENTERED")
+                    .doit()
+                    .await
+                {
+                    Ok((_r, _)) => tracing::info!("Wrote folder link to {}", range),
+                    Err(e) => tracing::error!("Failed to write {}: {}", range, e),
+                }
+            }
+            InternalType::File | InternalType::Link => {
+                if last_was_folder {
+                    last_was_folder = false;
+
+                    let range = format!("'{}'!C{}", safe_title, row);
+                    let vr = google_sheets4::api::ValueRange {
+                        range: Some(range.clone()),
+                        major_dimension: None,
+                        values: Some(vec![vec![serde_json::Value::String(
+                            "Loose files:".to_string(),
+                        )]]),
+                    };
+
+                    match hub
+                        .spreadsheets()
+                        .values_update(vr, &project.spreadsheet_id, &range)
+                        .value_input_option("USER_ENTERED")
+                        .doit()
+                        .await
+                    {
+                        Ok((_r, _)) => tracing::info!("Wrote marker to {}", range),
+                        Err(e) => tracing::error!("Failed to write {}: {}", range, e),
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn create_filetype_tags(
+    project: &Project,
+    hub: google_sheets4::Sheets<
+        google_sheets4::hyper_rustls::HttpsConnector<
+            google_sheets4::hyper_util::client::legacy::connect::HttpConnector,
+        >,
+    >,
+    box_config: r#box::apis::configuration::Configuration,
+    flat: &Vec<Node>,
+) {
+    match magic_db::load() {
+        Ok(db) => {
+            {
+                // Iterate flattened entries (skip the root at index 0). Place results starting at row 2.
+                let flat_entries = flat.clone();
+                let safe_title = project.name.replace('\'', "''");
+                let client = reqwest::Client::new();
+                'out: for (i, node) in flat_entries.into_iter().enumerate().skip(1) {
+                    let row = 2 + (i - 1); // top-level is row 1, first child -> row 2
+                    let value = match node.file_type {
+                        InternalType::Folder => {
+                            // skip folders
+                            continue;
+                        }
+                        InternalType::Link => "Web link".to_string(),
+                        InternalType::File => {
+                            // Download up to 100KiB from Box using the file ID
+                            let resp = get_files_id_content(
+                                &box_config,
+                                GetFilesIdContentParams {
+                                    file_id: node.id,
+                                    range: Some(format!("bytes=0-{}", (100 * 1024))),
+                                    boxapi: None,
+                                    version: None,
+                                    access_token: None,
+                                },
+                            )
+                            .await
+                            .map(|f| f.url().to_owned());
+
+                            let url = match resp {
+                                Ok(url) => url,
+                                Err(e) => {
+                                    error!("Failed to get file download URL: {}", e);
+                                    break;
+                                }
+                            };
+
+                            let token = match box_config.oauth_access_token.clone() {
+                                Some(t) => t,
+                                None => {
+                                    error!("Not logged in to Box");
+                                    break;
+                                }
+                            };
+
+                            let resp =
+                                match client.get(url.to_owned()).bearer_auth(&token).send().await {
+                                    Ok(r) => r,
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to download file {}: {}",
+                                            node.name,
+                                            e.to_string()
+                                        );
+                                        break;
+                                    }
+                                };
+
+                            let mut buf = if let Some(l) = resp.content_length() {
+                                Vec::with_capacity(l.try_into().unwrap_or(usize::MAX)) // We might be on 32 bit who knows
+                            } else {
+                                Vec::new()
+                            };
+
+                            let mut stream = resp.bytes_stream();
+
+                            while let Some(chunk) = stream.next().await {
+                                let chunk = match chunk {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        error!("Failed to download file {}: {}", &node.name, e);
+                                        break 'out;
+                                    }
+                                };
+                                buf.extend_from_slice(&chunk);
+                            }
+
+                            debug!("downloaded file {}", &node.name);
+
+                            let mut cursor = Cursor::new(buf);
+
+                            // Analyze with MagicDb
+                            let detected = match db.best_magic(&mut cursor) {
+                                Ok(result) => {
+                                    // pick the first sensible result if present
+                                    result.message()
+                                }
+                                Err(_) => {
+                                    warn!("Failed to analyze file {}", &node.name);
+                                    "Unknown".to_string()
+                                }
+                            };
+                            detected
+                        }
+                    };
+
+                    // Write the result into column G for this row
+                    let range = format!("'{}'!G{}", safe_title, row);
+                    let vr = google_sheets4::api::ValueRange {
+                        range: Some(range.clone()),
+                        major_dimension: None,
+                        values: Some(vec![vec![serde_json::Value::String(value)]]),
+                    };
+                    match hub
+                        .spreadsheets()
+                        .values_update(vr, &project.spreadsheet_id, &range)
+                        .value_input_option("RAW")
+                        .doit()
+                        .await
+                    {
+                        Ok((_r, _)) => {
+                            tracing::info!("Wrote file type to {}", range);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to write {}: {}", range, e);
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!(
+                "Failed to load filetype detection database: {}",
+                e.to_string()
+            );
+        }
+    }
+}
+
+// Write file and link names with hyperlinks
+async fn create_file_names(
+    project: &Project,
+    hub: google_sheets4::Sheets<
+        google_sheets4::hyper_rustls::HttpsConnector<
+            google_sheets4::hyper_util::client::legacy::connect::HttpConnector,
+        >,
+    >,
+    flat: &Vec<Node>,
+) {
+    let flat_entries = flat.clone();
+    let safe_title = project.name.replace('\'', "''");
+    for (i, node) in flat_entries.into_iter().enumerate().skip(1) {
+        let row = 2 + (i - 1);
+
+        match node.file_type {
+            InternalType::File | InternalType::Link => {
+
+                let esc_name = node.name.replace('"', "\\\"");
+                let esc_url = node.web_link.replace('"', "\\\"");
+                let formula = format!("=HYPERLINK(\"{}\",\"{}\")", esc_url, esc_name);
+                let range = format!("'{}'!D{}", safe_title, row);
+                let vr = google_sheets4::api::ValueRange {
+                    range: Some(range.clone()),
+                    major_dimension: None,
+                    values: Some(vec![vec![serde_json::Value::String(formula)]]),
+                };
+
+                match hub
+                    .spreadsheets()
+                    .values_update(vr, &project.spreadsheet_id, &range)
+                    .value_input_option("USER_ENTERED")
+                    .doit()
+                    .await
+                {
+                    Ok((_r, _)) => tracing::info!("Wrote file link to {}", range),
+                    Err(e) => tracing::error!("Failed to write {}: {}", range, e),
+                }
+            }
+            InternalType::Folder => { }
+        }
+    }
+}
+
+
+// Attempt to rename the newly copied sheet to the project name
+async fn rename_new_sheet(
+    project: &Project,
+    hub: google_sheets4::Sheets<
+        google_sheets4::hyper_rustls::HttpsConnector<
+            google_sheets4::hyper_util::client::legacy::connect::HttpConnector,
+        >,
+    >,
+    props: google_sheets4::api::SheetProperties,
+) {
+    let rename_req = BatchUpdateSpreadsheetRequest {
+        requests: Some(vec![google_sheets4::api::Request {
+            update_sheet_properties: Some(google_sheets4::api::UpdateSheetPropertiesRequest {
+                properties: Some(google_sheets4::api::SheetProperties {
+                    sheet_id: props.sheet_id,
+                    title: Some(project.name.clone()),
+                    ..Default::default()
+                }),
+                fields: Some(FieldMask::new(&["title"])),
+            }),
+            ..Default::default()
+        }]),
+        ..Default::default()
+    };
+    match hub
+        .spreadsheets()
+        .batch_update(rename_req, &project.spreadsheet_id)
+        .doit()
+        .await
+    {
+        Ok((_resp, _)) => {
+            tracing::info!(
+                "Renamed copied sheet to \"{}\" in {}",
+                project.name,
+                project.spreadsheet_id
+            );
+        }
+        Err(e) => {
+            tracing::error!("Failed to rename copied sheet: {}", e);
         }
     }
 }

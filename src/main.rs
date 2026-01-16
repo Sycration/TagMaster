@@ -133,6 +133,8 @@ struct State {
     log_receiver: Receiver<(String, tracing::Level)>,
 }
 
+pub static TEMPLATE_ID: &str = "1q_tfznc0LUGesvm2Yb5EqUCdhhpimJFLUkrZZJ8XvWY";
+
 static CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     let cd = directories::ProjectDirs::from("org", "GenEq", "TagMonster")
         .map(|pd| pd.config_local_dir().to_path_buf())
@@ -166,7 +168,7 @@ impl State {
 
 pub fn main() -> anyhow::Result<()> {
     unsafe {
-        std::env::set_var("RUST_LOG", "debug");
+        std::env::set_var("RUST_LOG", "info");
     }
     let (tx, rx) = tokio::sync::broadcast::channel::<(String, tracing::Level)>(2usize.pow(16));
     let log_guard = log::init_logging(tx)?;
